@@ -149,7 +149,8 @@ main:
                   seconds: 10
                 next: poll_workflow
             - workflow_done:
-                nop: true
+                assign:
+                  - noop: null
 
     - advance_window:
         assign:
