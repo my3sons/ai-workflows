@@ -38,6 +38,7 @@ trigger_master_orchestrator() {
     local batch_size=${1:-10000}
     local max_concurrent=${2:-5}
     local start_row=${3:-1}
+    local record_limit=${4:-0}
     local execution_id="manual_exec_$(date +%Y%m%d_%H%M%S)"
     
     print_info "Triggering master orchestrator..."
@@ -45,6 +46,7 @@ trigger_master_orchestrator() {
     print_info "Batch size: $batch_size"
     print_info "Max concurrent: $max_concurrent"
     print_info "Start row: $start_row"
+    print_info "Record limit: $record_limit"
     
     gcloud workflows execute ta-main-workflow \
         --location=$REGION \
@@ -60,7 +62,9 @@ trigger_master_orchestrator() {
             \"model\": \"gemini-2.5-flash-lite\",
             \"batch_size\": $batch_size,
             \"max_concurrent_workflows\": $max_concurrent,
-            \"start_row\": $start_row
+            \"start_row\": $start_row,
+            \"record_limit\": $record_limit,
+            \"max_batches\": 1000
         }"
     
     print_status "Master orchestrator triggered successfully"
@@ -101,13 +105,13 @@ trigger_single_batch() {
 # Function to trigger test run
 trigger_test_run() {
     print_info "Triggering test run (small dataset)..."
-    trigger_master_orchestrator 100 2 1
+    trigger_master_orchestrator 100 2 1 0
 }
 
 # Function to trigger production run
 trigger_production_run() {
     print_info "Triggering production run (full dataset)..."
-    trigger_master_orchestrator 10000 5 1
+    trigger_master_orchestrator 10000 5 1 0
 }
 
 # Function to trigger incremental run
@@ -130,9 +134,10 @@ trigger_incremental_run() {
     fi
     
     print_info "Will create $num_batches batches starting from row $start_row"
+    print_info "Record limit set to $total_records (rows $start_row to $end_row)"
     
-    # Trigger master orchestrator with start_row parameter
-    trigger_master_orchestrator $batch_size $max_concurrent $start_row
+    # Trigger master orchestrator with start_row and record_limit parameters
+    trigger_master_orchestrator $batch_size $max_concurrent $start_row $total_records
     
     print_status "Incremental run triggered successfully"
 }
@@ -213,7 +218,7 @@ case "${1:-}" in
         batch_size=${2:-10000}
         max_concurrent=${3:-5}
         start_row=${4:-1}
-        trigger_master_orchestrator $batch_size $max_concurrent $start_row
+        trigger_master_orchestrator $batch_size $max_concurrent $start_row 0
         show_monitoring
         ;;
     "monitor")
