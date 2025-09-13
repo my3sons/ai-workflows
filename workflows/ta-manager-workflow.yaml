@@ -17,7 +17,6 @@ main:
     - init_chunk:
         assign:
           - chunk: []
-          - current_started_workflows: []
           - j: 0
 
     - fill_chunk_check:
@@ -40,7 +39,7 @@ main:
 
     - start_chunk_in_parallel:
         parallel:
-          shared: [all_started_workflows, current_started_workflows]
+          shared: [all_started_workflows]
           for:
             value: current_batch
             in: ${chunk}
@@ -114,7 +113,6 @@ main:
                           result: workflow_execution
                       - record_started_workflow:
                           assign:
-                            - current_started_workflows: ${list.concat(current_started_workflows, [workflow_execution.name])}
                             - all_started_workflows: ${list.concat(all_started_workflows, [workflow_execution.name])}
                   except:
                     as: error
@@ -125,32 +123,61 @@ main:
                             text: ${"ERROR - Failed to start worker sub-workflow for batch_id " + debug_batch_id + ". Details " + json.encode_to_string(error)}
                             severity: ERROR
 
+    - capture_chunk_execs:
+        assign:
+          # take just-started exec IDs for this chunk (last len(chunk) entries)
+          - chunk_execs: ${slice(all_started_workflows, len(all_started_workflows)-len(chunk), len(all_started_workflows))}
 
-    - wait_for_chunk_completion:
-        for:
-          value: workflow_name
-          in: ${current_started_workflows}
-          steps:
-            - poll_workflow:
-                call: http.get
-                args:
-                  url: ${"https://workflowexecutions.googleapis.com/v1/" + workflow_name}
-                  auth:
-                    type: OAuth2
-                result: wf_status
-            - check_state:
-                switch:
-                  - condition: ${wf_status.body.state in ["SUCCEEDED", "FAILED", "CANCELLED"]}
-                    next: workflow_done
-                next: sleep_and_retry
-            - sleep_and_retry:
-                call: sys.sleep
-                args:
-                  seconds: 10
-                next: poll_workflow
-            - workflow_done:
-                assign:
-                  - noop: null
+    - wait_for_chunk_to_finish:
+        call: wait_for_executions
+        args:
+          exec_names: ${chunk_execs}
+
+    - wait_for_executions:
+      params: [exec_names]
+      steps:
+        - remaining_init:
+            assign:
+              - remaining: ${exec_names}
+        - loop:
+            steps:
+              - check_all:
+                  parallel:
+                    shared: [still_running]
+                    assign:
+                      - still_running: []
+                    for:
+                      value: ex
+                      in: ${remaining}
+                      steps:
+                        - get_status:
+                            call: http.get
+                            args:
+                              url: ${"https://workflowexecutions.googleapis.com/v1/" + ex}
+                              auth: { type: OAuth2 }
+                            result: st
+                        - keep_if_running:
+                            switch:
+                              - condition: ${st.body.state in ["ACTIVE","RUNNING","PENDING"]}
+                                next: add
+                            next: skip
+                        - add:
+                            assign:
+                              - still_running: ${list.concat(still_running, [ex])}
+                        - skip:
+                            assign: {}
+              - done_or_sleep:
+                  switch:
+                    - condition: ${len(still_running) == 0}
+                      return: true
+                  next: snooze
+              - snooze:
+                  call: sys.sleep
+                  args: { seconds: 30 }
+              - continue:
+                  assign:
+                    - remaining: ${still_running}
+                  next: loop
 
     - advance_window:
         assign:
