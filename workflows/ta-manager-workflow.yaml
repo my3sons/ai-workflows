@@ -133,56 +133,6 @@ main:
         args:
           exec_names: ${chunk_execs}
 
-    - wait_for_executions:
-      params: [exec_names]
-      steps:
-        - remaining_init:
-            assign:
-              - remaining: ${exec_names}
-        - loop:
-            steps:
-              - check_all:
-                  parallel:
-                    shared: [still_running]
-                    assign:
-                      - still_running: []
-                    for:
-                      value: ex
-                      index: idx
-                      in: ${remaining}
-                      steps:
-                        - set_ex_name:
-                            assign:
-                              - ex_name: ${if (type(ex) == "array", ex[0], ex)}
-                        - get_status:
-                            call: http.get
-                            args:
-                              url: ${"https://workflowexecutions.googleapis.com/v1/" + ex_name}
-                              auth: { type: OAuth2 }
-                            result: st
-                        - keep_if_running:
-                            switch:
-                              - condition: ${st.body.state in ["ACTIVE","RUNNING","PENDING"]}
-                                next: add
-                            next: skip
-                        - add:
-                            assign:
-                              - still_running: ${list.concat(still_running, [ex_name])}
-                        - skip:
-                            assign: {}
-              - done_or_sleep:
-                  switch:
-                    - condition: ${len(still_running) == 0}
-                      return: true
-                  next: snooze
-              - snooze:
-                  call: sys.sleep
-                  args: { seconds: 30 }
-              - continue:
-                  assign:
-                    - remaining: ${still_running}
-                  next: loop
-
     - advance_window:
         assign:
           - i: ${i + j}
@@ -190,3 +140,4 @@ main:
 
     - done:
         return: ${all_started_workflows}
+
