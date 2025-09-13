@@ -148,12 +148,16 @@ main:
                       - still_running: []
                     for:
                       value: ex
+                      index: idx
                       in: ${remaining}
                       steps:
+                        - set_ex_name:
+                            assign:
+                              - ex_name: ${if (type(ex) == "array", ex[0], ex)}
                         - get_status:
                             call: http.get
                             args:
-                              url: ${"https://workflowexecutions.googleapis.com/v1/" + ex}
+                              url: ${"https://workflowexecutions.googleapis.com/v1/" + ex_name}
                               auth: { type: OAuth2 }
                             result: st
                         - keep_if_running:
@@ -163,7 +167,7 @@ main:
                             next: skip
                         - add:
                             assign:
-                              - still_running: ${list.concat(still_running, [ex])}
+                              - still_running: ${list.concat(still_running, [ex_name])}
                         - skip:
                             assign: {}
               - done_or_sleep:
