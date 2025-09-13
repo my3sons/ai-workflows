@@ -79,6 +79,8 @@ def create_batch_plan(request_data):
         dataset = request_data.get("dataset")
         max_concurrent_batches = request_data.get("max_concurrent_batches", 3)
         start_row = request_data.get("start_row", 1)  # Default to 1 if not provided
+        record_limit = request_data.get("record_limit")
+        max_batches = request_data.get("max_batches", 1000)
 
         # Debug logging for the specific parameter
         logger.info(
@@ -88,7 +90,7 @@ def create_batch_plan(request_data):
             f"DEBUG - max_concurrent_batches type: {type(max_concurrent_batches)}"
         )
 
-        # Ensure max_concurrent_batches is an integer
+        # Ensure numeric parameters are integers
         try:
             max_concurrent_batches = int(max_concurrent_batches)
             logger.info(
@@ -100,6 +102,15 @@ def create_batch_plan(request_data):
             )
             max_concurrent_batches = 3
 
+        try:
+            max_batches = int(max_batches)
+            logger.info(f"DEBUG - max_batches: {max_batches}")
+        except (ValueError, TypeError) as e:
+            logger.warning(
+                f"Could not convert max_batches to int, using default 1000. Error: {e}"
+            )
+            max_batches = 1000
+
         # Ensure batch_size is an integer
         try:
             batch_size = int(batch_size)
@@ -107,7 +118,7 @@ def create_batch_plan(request_data):
         except (ValueError, TypeError) as e:
             logger.warning(f"Could not convert batch_size to int. Error: {e}")
 
-        # Ensure start_row is an integer
+        # Ensure start_row and record_limit are integers
         try:
             start_row = int(start_row)
             logger.info(f"DEBUG - start_row: {start_row}")
@@ -117,15 +128,27 @@ def create_batch_plan(request_data):
             )
             start_row = 1
 
-        # Calculate number of batches needed to process all records starting from start_row
+        try:
+            record_limit = int(record_limit) if record_limit is not None else None
+            logger.info(f"DEBUG - record_limit: {record_limit}")
+        except (ValueError, TypeError) as e:
+            logger.warning(
+                f"Could not convert record_limit to int. Ignoring record limit. Error: {e}"
+            )
+            record_limit = None
+
+        # Calculate number of batches needed to process records starting from start_row
         try:
             total_records = int(total_records)
             records_to_process = max(total_records - start_row + 1, 0)
+            if record_limit is not None and record_limit > 0:
+                records_to_process = min(records_to_process, record_limit)
             num_batches_needed = (records_to_process + batch_size - 1) // batch_size
-            actual_batches_to_create = num_batches_needed
+            actual_batches_to_create = min(num_batches_needed, max_batches)
             logger.info(
                 f"DEBUG - Total records: {total_records}, start_row: {start_row}, "
-                f"batch_size: {batch_size}, batches needed: {num_batches_needed}"
+                f"batch_size: {batch_size}, record_limit: {record_limit}, batches needed: {num_batches_needed}, "
+                f"creating: {actual_batches_to_create}"
             )
         except (ValueError, TypeError) as e:
             logger.warning(

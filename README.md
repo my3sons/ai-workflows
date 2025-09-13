@@ -38,7 +38,7 @@ transcription-analytics-workflows/
 │   ├── run_retry_workflow.sh     # Retry workflow execution
 │   ├── setup_cloud_scheduler.sh  # Automated scheduling
 │   ├── test_orchestrator.py      # Comprehensive testing
-│   └── test_start_row.py         # Start row functionality testing
+│   └── start_row_test_script.py  # Start row functionality testing
 ├── docs/                         # Documentation
 │   ├── workflow_flow_diagram.md  # Workflow flow documentation
 │   ├── workflow_execution_guide.md  # Execution guide

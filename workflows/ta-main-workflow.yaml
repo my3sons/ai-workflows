@@ -15,6 +15,8 @@ main:
           - batch_size: ${int(default(args.batch_size, 100))}
           - max_concurrent_workflows: ${int(default(args.max_concurrent_workflows, 5))}
           - start_row: ${int(default(args.start_row, 1))}
+          - record_limit: ${int(default(args.record_limit, 0))}
+          - max_batches: ${int(default(args.max_batches, 1000))}
           - execution_id: ${sys.get_env("GOOGLE_CLOUD_WORKFLOW_EXECUTION_ID")}
 
     - log_inputs:
@@ -53,6 +55,8 @@ main:
             execution_id: ${default(execution_id, "")}
             max_concurrent_batches: ${max_concurrent_workflows}
             start_row: ${start_row}
+            record_limit: ${record_limit}
+            max_batches: ${max_batches}
             total_records: ${total_records_resp.body.total_records}
         result: batch_plan
 
