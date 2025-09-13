@@ -86,7 +86,9 @@ The function supports the following actions:
   "batch_size": 100,
   "project_id": "bbyus-ana-puca-d01",
   "dataset": "ORDER_ANALYSIS",
-  "start_row": 1
+  "start_row": 1,
+  "record_limit": 500,
+  "max_batches": 1000
 }
 ```
 
@@ -97,6 +99,8 @@ The function supports the following actions:
 - `project_id` (required): Google Cloud project ID
 - `dataset` (required): BigQuery dataset name
 - `start_row` (optional, default: 1): Starting row number for batch processing
+- `record_limit` (optional): Maximum number of records to plan for in this call. Useful for small test runs.
+- `max_batches` (optional, default: 1000): Hard cap on the number of batches returned to prevent large memory usage.
 
 
 
@@ -140,7 +144,8 @@ curl -X POST https://us-central1-bbyus-ana-puca-d01.cloudfunctions.net/batch-orc
     "batch_size": 25,
     "project_id": "bbyus-ana-puca-d01",
     "dataset": "ORDER_ANALYSIS",
-    "start_row": 1
+    "start_row": 1,
+    "record_limit": 50
   }'
 
 # Test 3: Create batch plan with custom start row
@@ -153,7 +158,8 @@ curl -X POST https://us-central1-bbyus-ana-puca-d01.cloudfunctions.net/batch-orc
     "batch_size": 25,
     "project_id": "bbyus-ana-puca-d01",
     "dataset": "ORDER_ANALYSIS",
-    "start_row": 1001
+    "start_row": 1001,
+    "record_limit": 50
   }'
 ```
 

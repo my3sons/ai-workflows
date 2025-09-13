@@ -19,7 +19,8 @@ def test_create_batch_plan_with_start_row(base_url: str, start_row: int = 1):
         "batch_size": 25,
         "project_id": "bbyus-ana-puca-d01",
         "dataset": "ORDER_ANALYSIS",
-        "start_row": start_row
+        "start_row": start_row,
+        "record_limit": 100
     }
     
     print(f"Testing create_batch_plan with start_row={start_row}")
