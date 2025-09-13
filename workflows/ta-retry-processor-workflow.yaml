@@ -1,0 +1,55 @@
+main:
+  params: [args]
+  steps:
+    - init:
+        assign:
+          - project_id: ${args.project_id}
+          - region: ${args.region}
+          - dataset: ${args.dataset}
+          - output_table: ${args.output_table}
+          - index_table: ${args.index_table}
+          - output_info: ${args.output_info}
+          - workflow_id: ${args.workflow_id}
+          - execution_id: ${default(args.execution_id, "")}
+          - batch_id: ${default(args.batch_id, "")}
+          - current_timestamp: ${sys.now()}
+
+    - log_retry_attempt:
+        call: sys.log
+        args:
+          text: ${"RETRY PROCESSOR - Starting retry for workflow_id " + workflow_id + ", batch_id " + batch_id + ", execution_id " + execution_id}
+          severity: INFO
+
+    - retry_process_results:
+        call: http.post
+        args:
+          url: ${"https://" + region + "-" + project_id + ".cloudfunctions.net/pass1-batch-processor"}
+          auth:
+            type: OIDC
+            audience: ${"https://" + region + "-" + project_id + ".cloudfunctions.net/pass1-batch-processor"}
+          body:
+            output_info: ${output_info}
+            project_id: ${project_id}
+            dataset: ${dataset}
+            output_table: ${output_table}
+            lookup_table: ${project_id + "." + dataset + "." + index_table}
+            workflow_id: ${workflow_id}
+            execution_id: ${execution_id}
+            batch_id: ${batch_id}
+            # Configurable parameters for retry
+            batch_size: ${default(args.batch_size, 50)}  # Smaller batches for better reliability
+            timeout_seconds: ${default(args.timeout_seconds, 1600)}
+            enable_chunked_processing: ${default(args.enable_chunked_processing, true)}
+            max_retries: ${default(args.max_retries, 3)}
+            chunk_size: ${default(args.chunk_size, 500)}  # Process in smaller chunks for large files
+          timeout: 1800  # 30 minutes max for the HTTP call
+        result: processing_result
+
+    - log_success:
+        call: sys.log
+        args:
+          text: ${"RETRY PROCESSOR - Successfully completed retry for workflow_id " + workflow_id + ", batch_id " + batch_id}
+          severity: INFO
+
+    - finish:
+        return: ${processing_result}

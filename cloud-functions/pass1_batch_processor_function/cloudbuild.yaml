@@ -1,0 +1,38 @@
+steps:
+  # Deploy the Cloud Function directly from source
+  - name: 'gcr.io/cloud-builders/gcloud'
+    args: [
+      'functions',
+      'deploy',
+      'pass1-batch-processor',
+      '--gen2',
+      '--memory=4GB',
+      '--cpu=1',
+      '--max-instances=4',
+      '--runtime=python312',
+      '--region=$_REGION',
+      '--source=pass1_batch_processor_function/src/',
+      '--entry-point=pass1_batch_processor',
+      '--ingress-settings=internal-only',
+      '--set-env-vars=PROJECT_ID=$PROJECT_ID,REGION=$_REGION,MODEL=$_MODEL',
+      '--service-account=$_SERVICE_ACCOUNT',
+      '--project=$PROJECT_ID',
+      '--vpc-connector=bby-net1-us-central1',
+      '--trigger-http',
+      '--egress-settings=all',
+      '--timeout=1800s'
+    ]
+    id: deploy
+
+# Define substitutions for configurable values
+substitutions:
+  _REGION: 'us-central1'
+  _MODEL: 'gemini-2.5-flash-lite'
+  _SERVICE_ACCOUNT: 'wf-puca-dataflow-v2-vfb6@bbyus-ana-puca-d01.iam.gserviceaccount.com'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+# Build timeout
+timeout: '1200s'
+

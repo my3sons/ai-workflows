@@ -1,0 +1,84 @@
+
+main:
+  params: [args]
+  steps:
+    - init:
+        assign:
+          - project_id: ${args.project_id}
+          - region: ${args.region}
+          - dataset: ${args.dataset}
+          - index_table: ${args.index_table}
+          - output_table: ${args.output_table}
+          - batch_bucket: ${args.batch_bucket}
+          - batch_output_bucket: ${args.batch_output_bucket}
+          - model: ${args.model}
+          - batch_size: ${int(default(args.batch_size, 100))}
+          - max_concurrent_workflows: ${int(default(args.max_concurrent_workflows, 5))}
+          - start_row: ${int(default(args.start_row, 1))}
+          - execution_id: ${sys.get_env("GOOGLE_CLOUD_WORKFLOW_EXECUTION_ID")}
+
+    - log_inputs:
+        call: sys.log
+        args:
+          text: ${"BATCH DEBUG - execution_id " + execution_id + ", batch_size " + batch_size + ", start_row " + start_row + ", index_table " + index_table + ", output_table " + output_table + ", max_concurrent_workflows " + max_concurrent_workflows}
+          severity: INFO
+
+    - create_batch_plan:
+        call: http.post
+        args:
+          url: ${"https://" + region + "-" + project_id + ".cloudfunctions.net/batch-orchestrator"}
+          auth:
+            type: OIDC
+            audience: ${"https://" + region + "-" + project_id + ".cloudfunctions.net/batch-orchestrator"}
+          body:
+            action: "create_batch_plan"
+            project_id: ${project_id}
+            dataset: ${dataset}
+            index_table: ${index_table}
+            batch_size: ${default(batch_size, 10)}
+            execution_id: ${default(execution_id, "")}
+            max_concurrent_batches: ${max_concurrent_workflows}
+            start_row: ${start_row}
+        result: batch_plan
+
+    - check_if_any_batches_to_process:
+        switch:
+          - condition: ${len(batch_plan.body.pending_batches) == 0}
+            next: no_batches_to_process
+
+    - build_args:
+        assign:
+          - exec_args:
+              execution_id: ${execution_id}
+              batch_plan: ${batch_plan}
+              max_concurrent: ${max_concurrent_workflows}
+              project_id: ${project_id}
+              region: ${region}
+              dataset: ${dataset}
+              index_table: ${index_table}
+              output_table: ${output_table}
+              batch_bucket: ${batch_bucket}
+              batch_output_bucket: ${batch_output_bucket}
+              model: ${model}
+
+    - start_batch_executor_workflow:
+        call: http.post
+        args:
+          url: ${"https://workflowexecutions.googleapis.com/v1/projects/" + project_id + "/locations/" + region + "/workflows/ta-manager-workflow/executions"}
+          auth:
+            type: OAuth2
+          body:
+            argument: ${json.encode_to_string(exec_args)}
+        result: executor_workflow_execution
+
+    - log_executor_start:
+        call: sys.log
+        args:
+          text: ${"Successfully started the batch executor sub-workflow " + executor_workflow_execution.body.name}
+          severity: INFO
+
+    - finish:
+        return: ${executor_workflow_execution.body.name}
+
+    - no_batches_to_process:
+        return: "No new records to process. Workflow finished."

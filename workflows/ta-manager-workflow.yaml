@@ -1,0 +1,133 @@
+main:
+  params: [args]
+  steps:
+    - init:
+        assign:
+          - all_started_workflows: []
+          - pending: ${args.batch_plan.body.pending_batches}
+          - total: ${len(pending)}
+          - i: 0
+
+    - loop_check:
+        switch:
+          - condition: ${i < total}
+            next: init_chunk
+        next: done
+
+    - init_chunk:
+        assign:
+          - chunk: []
+          - j: 0
+
+    - fill_chunk_check:
+        switch:
+          - condition: ${j < args.max_concurrent and (i + j) < total}
+            next: add_to_chunk
+        next: debug_chunk
+
+    - add_to_chunk:
+        assign:
+          - chunk: ${list.concat(chunk, [pending[i + j]])}
+          - j: ${j + 1}
+        next: fill_chunk_check
+
+    - debug_chunk:
+        call: sys.log
+        args:
+          text: ${"DEBUG chunk_length " + string(len(chunk)) + " first_element " + json.encode_to_string(if(len(chunk) > 0, chunk[0], "empty"))}
+        next: start_chunk_in_parallel
+
+    - start_chunk_in_parallel:
+        parallel:
+          shared: [all_started_workflows]
+          for:
+            value: current_batch
+            in: ${chunk}
+            steps:
+              - debug_current_batch:
+                  call: sys.log
+                  args:
+                    text: ${"DEBUG current_batch_value " + json.encode_to_string(current_batch)}
+                    
+              - prepare_batch_args:
+                  try:
+                    steps:
+                      - debug_before_access:
+                          call: sys.log
+                          args:
+                            text: "About to access current_batch properties"
+                            
+                      - assign_step_by_step:
+                          assign:
+                            - debug_start_row: ${current_batch[0].start_row}
+                            - debug_end_row: ${current_batch[0].end_row}
+                            - debug_batch_id: ${current_batch[0].batch_id}
+                            - where_clause: ${"WHERE row_num between " + string(debug_start_row) + " and " + string(debug_end_row)}
+                            
+                      - debug_after_batch_access:
+                          call: sys.log
+                          args:
+                            text: "Successfully accessed batch properties"
+                            
+                      - assign_workflow_args:
+                          assign:
+                            - workflow_args:
+                                project_id: ${args.project_id}
+                                region: ${args.region}
+                                dataset: ${args.dataset}
+                                index_table: ${args.index_table}
+                                output_table: ${args.output_table}
+                                batch_bucket: ${args.batch_bucket}
+                                batch_output_bucket: ${args.batch_output_bucket}
+                                model: ${args.model}
+                                execution_id: ${args.execution_id}
+                                batch_id: ${debug_batch_id}
+                                where_clause: ${where_clause}
+                  except:
+                    as: e
+                    steps:
+                      - log_detailed_error:
+                          call: sys.log
+                          args:
+                            text: ${"ERROR in prepare_batch_args " + json.encode_to_string(e) + " current_batch " + json.encode_to_string(current_batch)}
+                            severity: ERROR
+                      - reraise_error:
+                          raise: ${e}
+
+              - log_call:
+                  call: sys.log
+                  args:
+                    text: ${"Starting worker sub-workflow for batch_id " + debug_batch_id}
+
+              - try_start_worker:
+                  try:
+                    steps:
+                      - start_worker_sub_workflow:
+                          call: http.post
+                          args:
+                            url: ${"https://workflowexecutions.googleapis.com/v1/projects/" + args.project_id + "/locations/" + args.region + "/workflows/ta-sub-workflow/executions"}
+                            auth:
+                              type: OAuth2
+                            body:
+                              argument: ${json.encode_to_string(workflow_args)}
+                          result: workflow_execution
+                      - record_started_workflow:
+                          assign:
+                            - all_started_workflows: ${list.concat(all_started_workflows, [workflow_execution.name])}
+                  except:
+                    as: error
+                    steps:
+                      - log_start_error:
+                          call: sys.log
+                          args:
+                            text: ${"ERROR - Failed to start worker sub-workflow for batch_id " + debug_batch_id + ". Details " + json.encode_to_string(error)}
+                            severity: ERROR
+
+
+    - advance_window:
+        assign:
+          - i: ${i + j}
+        next: loop_check
+
+    - done:
+        return: ${all_started_workflows}

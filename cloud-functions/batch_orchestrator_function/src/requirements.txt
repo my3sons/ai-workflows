@@ -1,0 +1,4 @@
+functions-framework
+google-auth
+requests
+google-cloud-aiplatform

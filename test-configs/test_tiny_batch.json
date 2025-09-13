@@ -1,0 +1,15 @@
+{
+  "project_id": "bbyus-ana-puca-d01",
+  "region": "us-central1",
+  "dataset": "ORDER_ANALYSIS",
+  "index_table": "transcription_pass_2",
+  "output_table": "transcription_analyzed_transcripts_test_tiny",
+  "batch_bucket": "puca-vertex-ai-batches-d01",
+  "batch_output_bucket": "puca-vertex-ai-batch-output-d01",
+  "model": "gemini-2.5-flash-lite",
+  "batch_size": 10,
+  "max_concurrent_workflows": 2,
+  "start_row": 1,
+  "test_mode": true,
+  "description": "Tiny test configuration - 10 records per batch, 2 concurrent workflows for quick validation"
+}

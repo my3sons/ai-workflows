@@ -1,0 +1,167 @@
+main:
+  params: [args]
+  steps:
+    - init:
+        assign:
+          - project_id: ${args.project_id}
+          - region: ${args.region}
+          - dataset: ${args.dataset}
+          - index_table: ${args.index_table}
+          - output_table: ${args.output_table}
+          - where_clause: ${args.where_clause}
+          - batch_bucket: ${args.batch_bucket}
+          - batch_output_bucket: ${args.batch_output_bucket}
+          - model: ${args.model}            
+          - current_timestamp: ${sys.now()}
+          - workflow_id: ${sys.get_env("GOOGLE_CLOUD_WORKFLOW_EXECUTION_ID")}
+          - batch_id: ${default(args.batch_id, "unknown")}
+          # Let the Cloud Function handle timestamp formatting for better readability
+          - batch_input_blob: "batch/analyze-batch-requests"
+          - batch_output_prefix: "analyze-batch-output"
+          
+    - log_file_paths:
+        call: sys.log
+        args:
+          text: ${"BATCH DEBUG - workflow_id " + workflow_id + ", batch_id " + batch_id + ", input_blob " + batch_input_blob + ", output_prefix " + batch_output_prefix}
+          
+    - generate_batch_file:
+        call: http.post
+        args:
+          url: ${"https://" + region + "-" + project_id + ".cloudfunctions.net/pass1-batch-generator"}
+          auth:
+            type: OIDC
+            audience: ${"https://" + region + "-" + project_id + ".cloudfunctions.net/pass1-batch-generator"}
+          body:
+            data:
+              project_id: ${project_id}
+              region: ${region}
+              dataset: ${dataset}
+              index_table: ${index_table}
+              where_clause: ${where_clause}
+              model: ${model}
+              batch_bucket: ${batch_bucket}
+              batch_input_blob: ${batch_input_blob}
+              batch_id: ${batch_id}
+        result: batch_result
+
+    - debug_response:
+        call: sys.log
+        args:
+          text: ${"GENERATOR RESPONSE " + json.encode_to_string(batch_result)}
+
+    - extract_actual_blob_name:
+        assign:
+          # Try to get blob_name from response, fallback to constructing it if not available
+          - actual_blob_name: ${default(batch_result.body.blob_name, "batch/analyze-batch-requests-" + string(int(current_timestamp)) + "-" + batch_id + ".jsonl")}
+
+    - log_blob_name:
+        call: sys.log
+        args:
+          text: ${"BATCH GENERATOR DEBUG - Using blob name " + actual_blob_name}
+
+    - log_batch_job_uri:
+        call: sys.log
+        args:
+          text: ${"BATCH JOB DEBUG - Submitting job with input URI gs://" + batch_bucket + "/" + actual_blob_name + ", output prefix gs://" + batch_output_bucket + "/" + batch_output_prefix}
+          
+    - submit_batch_job:
+        call: http.post
+        args:
+          url: ${"https://" + region + "-aiplatform.googleapis.com/v1/projects/" + project_id + "/locations/" + region + "/batchPredictionJobs"}
+          auth:
+            type: OAuth2
+          body:
+            displayName: ${"analyze-batch-job-" + workflow_id}
+            model: ${"publishers/google/models/" + model}
+            inputConfig:
+              instancesFormat: "jsonl"
+              gcsSource:
+                uris: ${["gs://" + batch_bucket + "/" + actual_blob_name]}
+            outputConfig:
+              predictionsFormat: "jsonl"
+              gcsDestination:
+                outputUriPrefix: ${"gs://" + batch_output_bucket + "/" + batch_output_prefix}
+        result: batch_job
+
+    - wait_for_completion:
+        call: poll_batch_job
+        args:
+          project_id: ${project_id}
+          region: ${region}
+          job_name: ${batch_job.body.name}
+        result: final_job_state
+
+    - check_job_success:
+        switch:
+          - condition: ${final_job_state.state == "JOB_STATE_SUCCEEDED"}
+            next: process_results
+          - condition: ${final_job_state.state == "JOB_STATE_FAILED"}
+            raise: ${"Batch job failed " + final_job_state.error.message}
+          - condition: ${final_job_state.state == "JOB_STATE_CANCELLED"}
+            raise: "Batch job was cancelled"
+          - condition: ${final_job_state.state == "JOB_STATE_PAUSED"}
+            raise: "Batch job was paused"
+
+    - process_results:
+        call: http.post
+        args:
+          url: ${"https://" + region + "-" + project_id + ".cloudfunctions.net/pass1-batch-processor"}
+          auth:
+            type: OIDC
+            audience: ${"https://" + region + "-" + project_id + ".cloudfunctions.net/pass1-batch-processor"}
+          body:
+            output_info: ${final_job_state.outputInfo}
+            project_id: ${project_id}
+            dataset: ${dataset}
+            output_table: ${args.output_table}
+            lookup_table: ${project_id + "." + dataset + "." + index_table}
+            workflow_id: ${workflow_id}
+            execution_id: ${default(args.execution_id, "")}
+            batch_id: ${default(args.batch_id, "")}
+            # Configurable parameters
+            batch_size: 50  # Smaller batches for better reliability
+            timeout_seconds: 1600  
+            enable_chunked_processing: true
+            max_retries: 3
+            chunk_size: 500  # Process in smaller chunks for large files
+          timeout: 1800  # 60 minutes max for the HTTP call
+        result: processing_result
+
+
+
+poll_batch_job:
+  params: [project_id, region, job_name]
+  steps:
+    - init_polling:
+        assign:
+          - poll_count: 0
+          - max_polls: 1440  # 12 hours at 30-second intervals
+
+    - check_job:
+        call: http.get
+        args:
+          url: ${"https://" + region + "-aiplatform.googleapis.com/v1/" + job_name}
+          auth:
+            type: OAuth2
+        result: job_status
+        next: check_if_complete
+
+    - check_if_complete:
+        switch:
+          - condition: ${job_status.body.state in ["JOB_STATE_SUCCEEDED", "JOB_STATE_FAILED", "JOB_STATE_CANCELLED", "JOB_STATE_PAUSED"]}
+            return: ${job_status.body}
+          - condition: ${poll_count >= max_polls}
+            raise: "Batch job polling timeout after 6 hours"
+          - condition: ${true}
+            next: wait_before_repolling
+
+    - wait_before_repolling:
+        assign:
+          - poll_count: ${poll_count + 1}
+        next: sleep_step
+
+    - sleep_step:
+        call: sys.sleep
+        args:
+          seconds: 30
+        next: check_job
