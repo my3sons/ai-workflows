@@ -12,9 +12,9 @@ steps:
       '--runtime=python312',
       '--project=$PROJECT_ID',
       '--region=$_REGION',
-      '--source=batch_orchestrator_function/src/',
+      '--source=cloud-functions/batch_orchestrator_function/src/',
       '--entry-point=batch_orchestrator',
-      '--ingress-settings=internal-only',g
+      '--ingress-settings=internal-only',
       '--service-account=$_SERVICE_ACCOUNT',
       '--vpc-connector=bby-net1-us-central1',
       '--trigger-http',
