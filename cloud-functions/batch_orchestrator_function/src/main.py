@@ -117,21 +117,25 @@ def create_batch_plan(request_data):
             )
             start_row = 1
 
-        # APPROACH 1 (DISABLED): Calculate number of batches needed to process all records
-        # try:
-        #     total_records = int(total_records)
-        #     logger.info(f"DEBUG - batch_size: {batch_size}, total_records: {total_records}")
-        #     num_batches_needed = (total_records + batch_size - 1) // batch_size
-        #     logger.info(f"DEBUG - Total records: {total_records}, batch_size: {batch_size}, batches needed: {num_batches_needed}")
-        #     actual_batches_to_create = num_batches_needed
-        # except (ValueError, TypeError) as e:
-        #     logger.warning(f"Could not convert total_records to int. Error: {e}")
-
-        # APPROACH 2 (CURRENT): Create exactly max_concurrent_batches number of batches
-        actual_batches_to_create = max_concurrent_batches
-        logger.info(
-            f"DEBUG - max_concurrent_batches: {max_concurrent_batches}, actual_batches_to_create: {actual_batches_to_create}"
-        )
+        # Calculate number of batches needed to process all records starting from start_row
+        try:
+            total_records = int(total_records)
+            records_to_process = max(total_records - start_row + 1, 0)
+            num_batches_needed = (records_to_process + batch_size - 1) // batch_size
+            actual_batches_to_create = num_batches_needed
+            logger.info(
+                f"DEBUG - Total records: {total_records}, start_row: {start_row}, "
+                f"batch_size: {batch_size}, batches needed: {num_batches_needed}"
+            )
+        except (ValueError, TypeError) as e:
+            logger.warning(
+                f"Could not convert total_records to int. Error: {e}. "
+                "Defaulting to creating max_concurrent_batches only."
+            )
+            actual_batches_to_create = max_concurrent_batches
+            logger.info(
+                f"DEBUG - Fallback actual_batches_to_create: {actual_batches_to_create}"
+            )
 
         # Create batch plan
         pending_batches = []
