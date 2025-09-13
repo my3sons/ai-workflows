@@ -23,6 +23,20 @@ main:
           text: ${"BATCH DEBUG - execution_id " + execution_id + ", batch_size " + batch_size + ", start_row " + start_row + ", index_table " + index_table + ", output_table " + output_table + ", max_concurrent_workflows " + max_concurrent_workflows}
           severity: INFO
 
+    - get_total_records:
+        call: http.post
+        args:
+          url: ${"https://" + region + "-" + project_id + ".cloudfunctions.net/batch-orchestrator"}
+          auth:
+            type: OIDC
+            audience: ${"https://" + region + "-" + project_id + ".cloudfunctions.net/batch-orchestrator"}
+          body:
+            action: "get_total_records"
+            project_id: ${project_id}
+            dataset: ${dataset}
+            index_table: ${index_table}
+        result: total_records_resp
+
     - create_batch_plan:
         call: http.post
         args:
@@ -39,6 +53,7 @@ main:
             execution_id: ${default(execution_id, "")}
             max_concurrent_batches: ${max_concurrent_workflows}
             start_row: ${start_row}
+            total_records: ${total_records_resp.body.total_records}
         result: batch_plan
 
     - check_if_any_batches_to_process:
