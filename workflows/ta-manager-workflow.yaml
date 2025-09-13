@@ -17,6 +17,7 @@ main:
     - init_chunk:
         assign:
           - chunk: []
+          - current_started_workflows: []
           - j: 0
 
     - fill_chunk_check:
@@ -39,7 +40,7 @@ main:
 
     - start_chunk_in_parallel:
         parallel:
-          shared: [all_started_workflows]
+          shared: [all_started_workflows, current_started_workflows]
           for:
             value: current_batch
             in: ${chunk}
@@ -59,9 +60,9 @@ main:
                             
                       - assign_step_by_step:
                           assign:
-                            - debug_start_row: ${current_batch[0].start_row}
-                            - debug_end_row: ${current_batch[0].end_row}
-                            - debug_batch_id: ${current_batch[0].batch_id}
+                            - debug_start_row: ${current_batch.start_row}
+                            - debug_end_row: ${current_batch.end_row}
+                            - debug_batch_id: ${current_batch.batch_id}
                             - where_clause: ${"WHERE row_num between " + string(debug_start_row) + " and " + string(debug_end_row)}
                             
                       - debug_after_batch_access:
@@ -113,6 +114,7 @@ main:
                           result: workflow_execution
                       - record_started_workflow:
                           assign:
+                            - current_started_workflows: ${list.concat(current_started_workflows, [workflow_execution.name])}
                             - all_started_workflows: ${list.concat(all_started_workflows, [workflow_execution.name])}
                   except:
                     as: error
@@ -123,6 +125,31 @@ main:
                             text: ${"ERROR - Failed to start worker sub-workflow for batch_id " + debug_batch_id + ". Details " + json.encode_to_string(error)}
                             severity: ERROR
 
+
+    - wait_for_chunk_completion:
+        for:
+          value: workflow_name
+          in: ${current_started_workflows}
+          steps:
+            - poll_workflow:
+                call: http.get
+                args:
+                  url: ${"https://workflowexecutions.googleapis.com/v1/" + workflow_name}
+                  auth:
+                    type: OAuth2
+                result: wf_status
+            - check_state:
+                switch:
+                  - condition: ${wf_status.body.state in ["SUCCEEDED", "FAILED", "CANCELLED"]}
+                    next: workflow_done
+                next: sleep_and_retry
+            - sleep_and_retry:
+                call: sys.sleep
+                args:
+                  seconds: 10
+                next: poll_workflow
+            - workflow_done:
+                nop: true
 
     - advance_window:
         assign:
