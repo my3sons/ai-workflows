@@ -1,22 +1,21 @@
 import functions_framework
 import json
-import re
 import base64
 import logging
 import time
 import psutil
 import os
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Literal
 
 # from google.cloud import storage
 from google.cloud import bigquery
 from google.cloud.exceptions import NotFound, BadRequest
 from google.api_core import retry
 from google.api_core.exceptions import GoogleAPIError
-from json_repair import repair_json
 from datetime import datetime
 from decimal import Decimal
 import logging
+from pydantic import BaseModel, ValidationError
 
 # Import your custom helper function from the local module
 from gcp_clients import get_bq_client, get_storage_client
@@ -25,12 +24,39 @@ from gcp_clients import get_bq_client, get_storage_client
 # logging.basicConfig(level=logging.INFO)
 # logger = logging.getLogger(__name__)
 
-# Pre-compiled regexes
-RE_KEY = re.compile(r'"key"\s*:\s*"([^"]+)"')
-RE_PART1 = re.compile(
-    r'"parts"\s*:\s*\[\s*{\s*"text"\s*:\s*"((?:\\.|[^"\\])*)"',
-    re.DOTALL,
-)
+class CallSentiment(BaseModel):
+    incoming: str
+    outgoing: str
+
+
+class ReasonForCall(BaseModel):
+    summary: str
+    intent: str
+    inquiryQuestion: Optional[str] = None
+    product: Optional[str] = None
+    productCategory: Optional[str] = None
+
+
+class AgentResponse(BaseModel):
+    resolved: Literal["yes", "partially", "no"]
+    summary: str
+    action: str
+
+
+class ProductItem(BaseModel):
+    name: str
+    context: str
+
+
+class CallAnalysis(BaseModel):
+    callSummary: str
+    callSentiment: Optional[CallSentiment] = None
+    callSentimentSummary: Optional[str] = None
+    callTone: Optional[str] = None
+    languageCode: Optional[str] = None
+    reasonForCall: Optional[ReasonForCall] = None
+    agentResponse: Optional[AgentResponse] = None
+    products: List[ProductItem] = []
 
 # Configuration constants
 DEFAULT_BATCH_SIZE = 100
@@ -771,28 +797,6 @@ def extract_via_json(obj: dict) -> str | None:
         return None
 
 
-def extract_via_regex(line: str) -> Tuple[str | None, str | None]:
-    """Extract key and text via regex fallback."""
-    key_match = RE_KEY.search(line)
-    part_match = RE_PART1.search(line)
-    key = key_match.group(1) if key_match else None
-    text = part_match.group(1) if part_match else None
-    return key, text
-
-
-def safe_repair_json(text: str) -> str:
-    """Safely attempt to repair JSON."""
-    try:
-        repaired = repair_json(text)
-        if repaired is not None:
-            return repaired.replace("(", "").replace(")", "")
-        return text
-    except Exception as exc:
-        print(f"ERROR: repair_json failed: {exc}")
-        logging.warning(f"repair_json failed: {exc}")
-        return text
-
-
 def extract_batch_from_content(jsonl_content: str) -> dict[str, str]:
     """Extract and process batch data from JSONL content."""
     result = {}
@@ -805,37 +809,19 @@ def extract_batch_from_content(jsonl_content: str) -> dict[str, str]:
         if not raw_line:
             continue
 
-        key = text = None
-
-        # Try JSON parse first
         try:
             obj = json.loads(raw_line)
             key = obj.get("key")
             text = extract_via_json(obj)
-            if text is not None:
-                text = safe_repair_json(text)
+            if key and text:
+                result[key] = text
+            else:
+                raise ValueError("required field(s) not found")
         except Exception as exc:
-            print(f"ERROR: JSON parse error on line {lineno}: {exc}")
-            parse_error = str(exc)
-        else:
-            parse_error = ""
-
-        # Regex fallback
-        if key is None or text is None:
-            r_key, r_text = extract_via_regex(raw_line)
-            key = key or r_key
-            text = text or r_text
-            if text is not None:
-                text = safe_repair_json(text)
-
-        # Success or failure
-        if key is not None and text is not None:
-            result[key] = text
-        else:
             failure = {
                 "lineno": lineno,
-                "reason": parse_error or "required field(s) not found",
-                "raw": raw_line[:500],  # truncate for logging
+                "reason": str(exc),
+                "raw": raw_line[:500],
             }
             failures.append(failure)
 
@@ -843,7 +829,7 @@ def extract_batch_from_content(jsonl_content: str) -> dict[str, str]:
         f"Processed {len(result)} lines successfully, {len(failures)} failures"
     )
 
-    if failures and len(failures) <= 10:  # Log small number of failures
+    if failures and len(failures) <= 10:
         logging.warning(f"Processing failures: {json.dumps(failures)}")
     elif failures:
         logging.warning(
@@ -860,16 +846,14 @@ def parse_responses(data: Dict[str, str]) -> Dict[str, dict]:
 
     for k, response_str in data.items():
         try:
-            payload = json.loads(response_str)
-            if not isinstance(payload, dict):
-                raise ValueError(f"Expected dict, got {type(payload).__name__}")
-            parsed_responses[k] = payload
-        except Exception as exc:
+            payload = CallAnalysis.model_validate_json(response_str)
+            parsed_responses[k] = payload.model_dump()
+        except (ValidationError, json.JSONDecodeError) as exc:
             print(f"ERROR: Failed to parse response for key '{k}': {exc}")
             error = {
                 "key": k,
                 "error": str(exc),
-                "text": response_str[:300],  # truncate for logging
+                "text": response_str[:300],
             }
             processing_errors.append(error)
 

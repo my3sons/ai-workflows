@@ -6,6 +6,43 @@ from google.auth import default
 import google.auth.transport.requests
 from google import genai
 from gcp_clients import get_bq_client, get_storage_client
+from pydantic import BaseModel
+from typing import List, Literal, Optional
+
+
+class CallSentiment(BaseModel):
+    incoming: str
+    outgoing: str
+
+
+class ReasonForCall(BaseModel):
+    summary: str
+    intent: str
+    inquiryQuestion: Optional[str] = None
+    product: Optional[str] = None
+    productCategory: Optional[str] = None
+
+
+class AgentResponse(BaseModel):
+    resolved: Literal["yes", "partially", "no"]
+    summary: str
+    action: str
+
+
+class ProductItem(BaseModel):
+    name: str
+    context: str
+
+
+class CallAnalysis(BaseModel):
+    callSummary: str
+    callSentiment: Optional[CallSentiment] = None
+    callSentimentSummary: Optional[str] = None
+    callTone: Optional[str] = None
+    languageCode: Optional[str] = None
+    reasonForCall: Optional[ReasonForCall] = None
+    agentResponse: Optional[AgentResponse] = None
+    products: List[ProductItem] = []
 
 
 def get_summary_prompt(transcript: str, direction: str) -> str:
@@ -418,6 +455,7 @@ def pass1_batch_generator(request):
         # Generate JSONL content
         print("Starting JSONL generation...")
         jsonl_lines = []
+        schema = CallAnalysis.model_json_schema()
 
         for i, row in enumerate(rows):
             try:
@@ -459,6 +497,8 @@ def pass1_batch_generator(request):
                         "generation_config": {
                             "temperature": 0.1,
                             "thinkingConfig": {"thinkingBudget": 0},
+                            "response_mime_type": "application/json",
+                            "response_schema": schema,
                         },
                     },
                 }
