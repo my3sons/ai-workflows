@@ -39,15 +39,17 @@ trigger_master_orchestrator() {
     local max_concurrent=${2:-5}
     local start_row=${3:-1}
     local record_limit=${4:-0}
+    local max_batches=${5:-1000}
     local execution_id="manual_exec_$(date +%Y%m%d_%H%M%S)"
-    
+
     print_info "Triggering master orchestrator..."
     print_info "Execution ID: $execution_id"
     print_info "Batch size: $batch_size"
     print_info "Max concurrent: $max_concurrent"
     print_info "Start row: $start_row"
     print_info "Record limit: $record_limit"
-    
+    print_info "Max batches: $max_batches"
+
     gcloud workflows execute ta-main-workflow \
         --location=$REGION \
         --project=$PROJECT_ID \
@@ -64,9 +66,9 @@ trigger_master_orchestrator() {
             \"max_concurrent_workflows\": $max_concurrent,
             \"start_row\": $start_row,
             \"record_limit\": $record_limit,
-            \"max_batches\": 1000
+            \"max_batches\": $max_batches
         }"
-    
+
     print_status "Master orchestrator triggered successfully"
 }
 
@@ -135,9 +137,9 @@ trigger_incremental_run() {
     
     print_info "Will create $num_batches batches starting from row $start_row"
     print_info "Record limit set to $total_records (rows $start_row to $end_row)"
-    
-    # Trigger master orchestrator with start_row and record_limit parameters
-    trigger_master_orchestrator $batch_size $max_concurrent $start_row $total_records
+
+    # Trigger master orchestrator with start_row, record_limit, and max_batches parameters
+    trigger_master_orchestrator $batch_size $max_concurrent $start_row $total_records $num_batches
     
     print_status "Incremental run triggered successfully"
 }
